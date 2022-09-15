@@ -1,19 +1,39 @@
 const std = @import("std");
-const common = @import("common.zig");
+
+// COMMON
+
+pub const WireType = enum(usize) {
+    varint_or_zigzag,
+    fixed64bit,
+    delimited,
+    group_start,
+    group_end,
+    fixed32bit,
+};
+
+pub const SplitTag = struct { field: usize, wire_type: WireType };
+fn splitTag(tag: usize) SplitTag {
+    return .{ .field = tag >> 3, .wire_type = @intToEnum(WireType, tag & 7) };
+}
+
+fn joinTag(split: SplitTag) usize {
+    return (split.field << 3) | split.wire_type;
+}
+
+fn readTag(reader: anytype) !SplitTag {
+    return splitTag(try std.leb.readULEB128(usize, reader));
+}
+
+fn writeTag(writer: anytype, split: SplitTag) !void {
+    try std.leb.writeULEB128(writer, joinTag(split));
+}
+
+// DECODE
 
 pub fn decode(comptime T: type, allocator: std.mem.Allocator, reader: anytype) !T {
     var value: T = undefined;
     try decodeInternal(T, &value, allocator, reader, true);
     return value;
-}
-
-pub const SplitTag = struct { field: usize, wire_type: common.WireType };
-fn splitTag(tag: usize) SplitTag {
-    return .{ .field = tag >> 3, .wire_type = @intToEnum(common.WireType, tag & 7) };
-}
-
-fn readTag(reader: anytype) !SplitTag {
-    return splitTag(try std.leb.readULEB128(usize, reader));
 }
 
 fn decodeMessageFields(comptime T: type, allocator: std.mem.Allocator, reader: anytype, length: usize) !T {
@@ -82,15 +102,7 @@ fn decodeInternal(
     }
 }
 
-const TestUtils = struct {
-    fn unmanagedFromSlice(comptime T: type, allocator: std.mem.Allocator, slice: []const T) !std.ArrayListUnmanaged(T) {
-        var arr = std.ArrayListUnmanaged(T){};
-        try arr.insertSlice(allocator, 0, slice);
-        return arr;
-    }
-};
-
-test {
+test "Decode" {
     const scip = @import("test/scip/scip.zig");
 
     var file = try std.fs.cwd().openFile("test/scip/basic.bin", .{});
@@ -140,3 +152,7 @@ test {
     //     .external_symbols = .{},
     // }, index);
 }
+
+// ENCODE
+
+test "Encode" {}
