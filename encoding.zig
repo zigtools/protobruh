@@ -17,7 +17,7 @@ fn splitTag(tag: usize) SplitTag {
 }
 
 fn joinTag(split: SplitTag) usize {
-    return (split.field << 3) | split.wire_type;
+    return (split.field << 3) | @enumToInt(split.wire_type);
 }
 
 fn readTag(reader: anytype) !SplitTag {
@@ -26,6 +26,10 @@ fn readTag(reader: anytype) !SplitTag {
 
 fn writeTag(writer: anytype, split: SplitTag) !void {
     try std.leb.writeULEB128(writer, joinTag(split));
+}
+
+fn isArrayList(comptime T: type) bool {
+    return @typeInfo(T) == .Struct and @hasField(T, "items") and @hasField(T, "capacity");
 }
 
 // DECODE
@@ -67,12 +71,9 @@ fn decodeInternal(
     reader: anytype,
     top: bool,
 ) !void {
-    _ = allocator;
-    _ = top;
-
     switch (@typeInfo(T)) {
         .Struct => {
-            if (@hasField(T, "items") and @hasField(T, "capacity")) {
+            if (comptime isArrayList(T)) {
                 const Child = @typeInfo(@field(T, "Slice")).Pointer.child;
                 const cti = @typeInfo(Child);
 
@@ -110,10 +111,10 @@ fn decodeInternal(
     }
 }
 
-test "Decode" {
+test "Decode basic" {
     const scip = @import("test/scip/scip.zig");
 
-    var file = try std.fs.cwd().openFile("test/scip/fuzzy.bin", .{});
+    var file = try std.fs.cwd().openFile("test/scip/basic.bin", .{});
     defer file.close();
 
     var reader = file.reader();
@@ -124,12 +125,12 @@ test "Decode" {
     const index = try decode(scip.Index, arena.allocator(), reader);
     std.log.err("{any}", .{index});
 
-    // try std.testing.expectEqual(scip.ProtocolVersion.unspecified_protocol_version, index.metadata.version);
-    // try std.testing.expectEqualSlices(u8, "joe", index.metadata.tool_info.name);
-    // try std.testing.expectEqualSlices(u8, "mama", index.metadata.tool_info.version);
-    // try std.testing.expectEqual(@as(usize, 2), index.metadata.tool_info.arguments.items.len);
-    // try std.testing.expectEqualSlices(u8, "amog", index.metadata.tool_info.arguments.items[0]);
-    // try std.testing.expectEqualSlices(u8, "us", index.metadata.tool_info.arguments.items[1]);
+    try std.testing.expectEqual(scip.ProtocolVersion.unspecified_protocol_version, index.metadata.version);
+    try std.testing.expectEqualSlices(u8, "joe", index.metadata.tool_info.name);
+    try std.testing.expectEqualSlices(u8, "mama", index.metadata.tool_info.version);
+    try std.testing.expectEqual(@as(usize, 2), index.metadata.tool_info.arguments.items.len);
+    try std.testing.expectEqualSlices(u8, "amog", index.metadata.tool_info.arguments.items[0]);
+    try std.testing.expectEqualSlices(u8, "us", index.metadata.tool_info.arguments.items[1]);
 
     // TODO: Check more of this result
 
@@ -164,4 +165,94 @@ test "Decode" {
 
 // ENCODE
 
-test "Encode" {}
+pub fn encode(value: anytype, writer: anytype) !void {
+    try encodeInternal(value, writer, true);
+}
+
+fn typeToWireType(comptime T: type) WireType {
+    if (@typeInfo(T) == .Struct or @typeInfo(T) == .Pointer) return .delimited;
+    if (@typeInfo(T) == .Int or @typeInfo(T) == .Bool) return .varint_or_zigzag;
+    @compileError("Wire type not handled: " ++ @typeName(T));
+}
+
+fn encodeMessageFields(value: anytype, writer: anytype) !void {
+    const T = @TypeOf(value);
+    inline for (@field(T, "tags")) |rel| {
+        const subval = @field(value, rel[0]);
+        const SubT = @TypeOf(subval);
+
+        if (comptime isArrayList(SubT) and !b: {
+            const Child = @typeInfo(@field(SubT, "Slice")).Pointer.child;
+            const cti = @typeInfo(Child);
+            break :b cti == .Int or cti == .Enum;
+        }) {
+            for (subval.items) |item| {
+                try writeTag(writer, .{ .field = rel[1], .wire_type = typeToWireType(@TypeOf(item)) });
+                try encodeInternal(item, writer, false);
+            }
+        } else {
+            try writeTag(writer, .{ .field = rel[1], .wire_type = typeToWireType(T) });
+            try encodeInternal(subval, writer, false);
+        }
+    }
+}
+
+fn encodeInternal(
+    value: anytype,
+    writer: anytype,
+    top: bool,
+) !void {
+    const T = @TypeOf(value);
+    switch (@typeInfo(T)) {
+        .Struct => {
+            if (comptime isArrayList(T)) {
+                var count_writer = std.io.countingWriter(std.io.null_writer);
+                for (value.items) |item| try encodeInternal(item, count_writer.writer(), false);
+                try std.leb.writeULEB128(writer, count_writer.bytes_written);
+                for (value.items) |item| try encodeInternal(item, writer, false);
+            } else {
+                if (!top) {
+                    var count_writer = std.io.countingWriter(std.io.null_writer);
+                    try encodeMessageFields(value, count_writer.writer());
+                    try std.leb.writeULEB128(writer, count_writer.bytes_written);
+                }
+                try encodeMessageFields(value, writer);
+            }
+        },
+        .Pointer => |ptr| {
+            _ = ptr;
+            // TODO: Handle non-slices
+            if (T == []const u8) {
+                try std.leb.writeULEB128(writer, value.len);
+                try writer.writeAll(value);
+            } else @compileError("Slices not implemented");
+        },
+        // TODO: non-usize enums
+        .Enum => try std.leb.writeULEB128(writer, @enumToInt(value)),
+        .Int => |i| switch (i.signedness) {
+            .signed => try std.leb.writeILEB128(writer, value),
+            .unsigned => try std.leb.writeULEB128(writer, value),
+        },
+        .Bool => try std.leb.writeULEB128(writer, @boolToInt(value)),
+        else => @compileError("Unsupported: " ++ @typeName(T)),
+    }
+}
+
+test "Decode and re-encode fuzzy" {
+    const scip = @import("test/scip/scip.zig");
+
+    var file = try std.fs.cwd().openFile("test/scip/fuzzy.bin", .{});
+    defer file.close();
+
+    var reader = file.reader();
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const index = try decode(scip.Index, arena.allocator(), reader);
+
+    var out_file = try std.fs.cwd().createFile("test/scip/fuzzy.bin.out", .{});
+    defer out_file.close();
+
+    try encode(index, out_file.writer());
+}
