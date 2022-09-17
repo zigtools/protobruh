@@ -123,14 +123,18 @@ test "Decode basic" {
     defer arena.deinit();
 
     const index = try decode(scip.Index, arena.allocator(), reader);
-    std.log.err("{any}", .{index});
-
     try std.testing.expectEqual(scip.ProtocolVersion.unspecified_protocol_version, index.metadata.version);
-    try std.testing.expectEqualSlices(u8, "joe", index.metadata.tool_info.name);
-    try std.testing.expectEqualSlices(u8, "mama", index.metadata.tool_info.version);
+    try std.testing.expectEqualStrings("joe", index.metadata.tool_info.name);
+    try std.testing.expectEqualStrings("mama", index.metadata.tool_info.version);
     try std.testing.expectEqual(@as(usize, 2), index.metadata.tool_info.arguments.items.len);
-    try std.testing.expectEqualSlices(u8, "amog", index.metadata.tool_info.arguments.items[0]);
-    try std.testing.expectEqualSlices(u8, "us", index.metadata.tool_info.arguments.items[1]);
+    try std.testing.expectEqualStrings("amog", index.metadata.tool_info.arguments.items[0]);
+    try std.testing.expectEqualStrings("us", index.metadata.tool_info.arguments.items[1]);
+    try std.testing.expectEqualStrings("C:\\Programming\\Zig\\scip-zig\\test", index.metadata.project_root);
+    try std.testing.expect(index.metadata.text_document_encoding == .utf8);
+    try std.testing.expectEqual(@as(usize, 1), index.documents.items.len);
+    try std.testing.expectEqualStrings("zig", index.documents.items[0].language);
+    try std.testing.expectEqualStrings("loris.zig", index.documents.items[0].relative_path);
+    try std.testing.expectEqual(@as(usize, 0), index.documents.items[0].occurrences.items.len);
 
     // TODO: Check more of this result
 
@@ -171,7 +175,7 @@ pub fn encode(value: anytype, writer: anytype) !void {
 
 fn typeToWireType(comptime T: type) WireType {
     if (@typeInfo(T) == .Struct or @typeInfo(T) == .Pointer) return .delimited;
-    if (@typeInfo(T) == .Int or @typeInfo(T) == .Bool) return .varint_or_zigzag;
+    if (@typeInfo(T) == .Int or @typeInfo(T) == .Bool or @typeInfo(T) == .Enum) return .varint_or_zigzag;
     @compileError("Wire type not handled: " ++ @typeName(T));
 }
 
@@ -191,7 +195,7 @@ fn encodeMessageFields(value: anytype, writer: anytype) !void {
                 try encodeInternal(item, writer, false);
             }
         } else {
-            try writeTag(writer, .{ .field = rel[1], .wire_type = typeToWireType(T) });
+            try writeTag(writer, .{ .field = rel[1], .wire_type = typeToWireType(SubT) });
             try encodeInternal(subval, writer, false);
         }
     }
