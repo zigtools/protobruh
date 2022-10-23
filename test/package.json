@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "diff": "^5.1.0",
+    "protobufjs": "^7.1.1"
+  }
+}

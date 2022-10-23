@@ -3,6 +3,6 @@
 /test/node_modules
 /test/package-lock.json
 
-/test/**.out
-/test/**.json
-**/fuzzy.bin
+/test/scip/*.out
+/test/scip/*.json
+/test/scip/fuzzy.bin
