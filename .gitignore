@@ -2,4 +2,7 @@
 /zig-out
 /test/node_modules
 /test/package-lock.json
-*.out
+
+/test/**.out
+/test/**.json
+**/fuzzy.bin

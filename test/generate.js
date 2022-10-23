@@ -27,7 +27,7 @@ function fuzzType(root, type) {
         const res = root.lookup(field.type);
         let values = [];
 
-        const e = field.repeated ? Math.ceil(Math.random() * 12) : 1;
+        const e = name === "range" ? 4 : (field.repeated ? Math.ceil(Math.random() * 12) : 1);
         for (let i = 0; i < e; i++) {
             if (res) {
                 values.push(res.values ? fuzzEnum(root, res) : fuzzType(root, res));

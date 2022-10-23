@@ -107,6 +107,26 @@ fn decodeInternal(
             .unsigned => try std.leb.readULEB128(T, reader),
         },
         .Bool => value.* = ((try std.leb.readULEB128(usize, reader)) != 0),
+        .Array => |arr| {
+            const Child = arr.child;
+            const cti = @typeInfo(Child);
+
+            if (cti == .Int or cti == .Enum) {
+                var lim = std.io.limitedReader(reader, try std.leb.readULEB128(usize, reader));
+                var array: [arr.len]Child = undefined;
+                var index: usize = 0;
+                while (true) : (index += 1) {
+                    const new_item = decode(Child, allocator, lim.reader()) catch break;
+                    if (index == array.len) return error.IndexOutOfRange;
+                    array[index] = new_item;
+                }
+                if (index != array.len) return error.ArrayNotFilled;
+
+                value.* = array;
+            } else {
+                @compileError("Array not of ints/enums not supported for decoding!");
+            }
+        },
         else => @compileError("Unsupported: " ++ @typeName(T)),
     }
 }
@@ -174,7 +194,7 @@ pub fn encode(value: anytype, writer: anytype) !void {
 }
 
 fn typeToWireType(comptime T: type) WireType {
-    if (@typeInfo(T) == .Struct or @typeInfo(T) == .Pointer) return .delimited;
+    if (@typeInfo(T) == .Struct or @typeInfo(T) == .Pointer or @typeInfo(T) == .Array) return .delimited;
     if (@typeInfo(T) == .Int or @typeInfo(T) == .Bool or @typeInfo(T) == .Enum) return .varint_or_zigzag;
     @compileError("Wire type not handled: " ++ @typeName(T));
 }
@@ -238,6 +258,12 @@ fn encodeInternal(
             .unsigned => try std.leb.writeULEB128(writer, value),
         },
         .Bool => try std.leb.writeULEB128(writer, @boolToInt(value)),
+        .Array => {
+            var count_writer = std.io.countingWriter(std.io.null_writer);
+            for (value) |item| try encodeInternal(item, count_writer.writer(), false);
+            try std.leb.writeULEB128(writer, count_writer.bytes_written);
+            for (value) |item| try encodeInternal(item, writer, false);
+        },
         else => @compileError("Unsupported: " ++ @typeName(T)),
     }
 }

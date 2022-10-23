@@ -421,7 +421,7 @@ pub const Occurrence = struct {
     /// instead.  The `repeated int32` encoding is admittedly more embarrassing to
     /// work with in some programming languages but we hope the performance
     /// improvements make up for it.
-    range: std.ArrayListUnmanaged(i32),
+    range: [4]i32,
     /// (optional) The symbol that appears at this position. See
     /// `SymbolInformation.symbol` for how to format symbols as strings.
     symbol: []const u8,
