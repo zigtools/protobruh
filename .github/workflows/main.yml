@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          submodules: true
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 16.x
+      - uses: goto-bus-stop/setup-zig@v1
+        with:
+          version: master
+
+      - run: zig version
+      - run: zig env
+
+      - name: Run Tests
+        run: |
+          cd test
+          npm ci
+
+          node generate.js
+          cd ..
+
+          zig test encoding.zig
+          cd test
+
+          node check.js

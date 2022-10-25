@@ -1,7 +1,6 @@
 /zig-cache
 /zig-out
 /test/node_modules
-/test/package-lock.json
 
 /test/scip/*.out
 /test/scip/*.json
